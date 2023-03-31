@@ -3,8 +3,14 @@
 run-testnet:
 	docker stop $$(docker ps -aq)
 	docker rm $$(docker ps -aq)
-	docker run -t -d is
+	docker run -t -d is-testnet
 	docker exec -it $$(docker ps -aq) /root/scripts/is-testnet-v2.sh
+
+with-gm-testnet:
+	docker stop $$(docker ps -aq)
+	docker rm $$(docker ps -aq)
+	docker run -t -d is-testnet
+	docker exec -it $$(docker ps -aq) /root/scripts/setup_gm.sh
 
 provider-logs:
 	docker exec -it $$(docker ps -q) tail -f /provider/logs

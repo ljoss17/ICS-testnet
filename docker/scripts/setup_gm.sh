@@ -1,5 +1,5 @@
 #!/bin/bash
-set -eux 
+set -eux
 
 # User balance of stake tokens 
 USER_COINS="100000000000stake"
@@ -9,26 +9,58 @@ STAKE="100000000stake"
 NODE_IP="127.0.0.1"
 
 # Home directory
-HOME_DIR="/root"
+HOME_DIR="/root/.gm"
 
 HERMES_DIR="/root/.hermes"
 
+GM_BINARY="/root/gm/bin/gm"
+
 USERNAME="coordinator"
 
-# Clean start
+PROVIDER_PORT="28200"
+
+CONSUMER_PORT="28100"
+
 pkill -f interchain-security-pd &> /dev/null || true
-rm -rf ${HOME_DIR}/provider
+
+rm -rf .gm
+
+mkdir .gm
+
+tee .gm/gm.toml<<EOF
+[global]
+  add_to_hermes = true
+  auto_maintain_config = true
+  extra_wallets = 2
+  gaiad_binary = "/usr/local/bin/interchain-security-pd"
+  hdpath = ""
+  home_dir = "/root/.gm"
+  ports_start_at = 28000
+  validator_mnemonic = ""
+  wallet_mnemonic = ""
+
+  [global.hermes]
+    binary = "/usr/local/bin/hermes"
+    config = "/root/.hermes/config.toml"
+    log_level = "info"
+    telemetry_enabled = false
+    telemetry_host = "127.0.0.1"
+    telemetry_port = 3001
+
+[provider]
+  ports_start_at = $PROVIDER_PORT
+
+[node2]
+  network = "provider"
+EOF
 
 # Build genesis file and node directory structure
 interchain-security-pd init --chain-id provider $USERNAME --home ${HOME_DIR}/provider
+
 jq ".app_state.gov.voting_params.voting_period = \"3s\"" \
    ${HOME_DIR}/provider/config/genesis.json > \
    ${HOME_DIR}/provider/edited_genesis.json && mv ${HOME_DIR}/provider/edited_genesis.json ${HOME_DIR}/provider/config/genesis.json
 sleep 1
-
-# jq condition to reduce unbonding time
-#  | .app_state.staking.params.unbonding_time = \"600s\"
-
 
 # Create account keypair
 interchain-security-pd keys add $USERNAME --home ${HOME_DIR}/provider --keyring-backend test --output json > ${HOME_DIR}/provider/${USERNAME}_prov_keypair.json 2>&1
@@ -38,7 +70,6 @@ sleep 1
 interchain-security-pd add-genesis-account $(jq -r .address ${HOME_DIR}/provider/${USERNAME}_prov_keypair.json) $USER_COINS --home ${HOME_DIR}/provider --keyring-backend test
 sleep 1
 
-
 # Stake 1/1000 user's coins
 interchain-security-pd gentx $USERNAME $STAKE --chain-id provider --home ${HOME_DIR}/provider --keyring-backend test --moniker $USERNAME
 sleep 1
@@ -46,22 +77,11 @@ sleep 1
 interchain-security-pd collect-gentxs --home ${HOME_DIR}/provider --gentx-dir ${HOME_DIR}/provider/config/gentx/
 sleep 1
 
-sed -i -r "/node =/ s/= .*/= \"tcp:\/\/${NODE_IP}:26658\"/" ${HOME_DIR}/provider/config/client.toml
+sed -i -r "/node =/ s/= .*/= \"tcp:\/\/${NODE_IP}:${PROVIDER_PORT}\"/" ${HOME_DIR}/provider/config/client.toml
 sed -i -r 's/timeout_commit = "5s"/timeout_commit = "3s"/g' ${HOME_DIR}/provider/config/config.toml
 sed -i -r 's/timeout_propose = "3s"/timeout_propose = "1s"/g' ${HOME_DIR}/provider/config/config.toml
 
-
-# Start gaia
-interchain-security-pd start \
-    --home ${HOME_DIR}/provider \
-    --rpc.laddr tcp://${NODE_IP}:26658 \
-    --grpc.address ${NODE_IP}:9091 \
-    --address tcp://${NODE_IP}:26655 \
-    --p2p.laddr tcp://${NODE_IP}:26656 \
-    --grpc-web.enable=false &> ${HOME_DIR}/provider/logs &
-
-sleep 5
-
+$GM_BINARY start
 # Build consumer chain proposal file
 tee ${HOME_DIR}/consumer-proposal.json<<EOF
 {
@@ -81,15 +101,13 @@ EOF
 interchain-security-pd keys show $USERNAME --keyring-backend test --home ${HOME_DIR}/provider
 
 # Submit consumer chain proposal
-interchain-security-pd tx gov submit-proposal consumer-addition ${HOME_DIR}/consumer-proposal.json --chain-id provider --from $USERNAME --home ${HOME_DIR}/provider --node tcp://${NODE_IP}:26658  --keyring-backend test -b block -y
+interchain-security-pd tx gov submit-proposal consumer-addition ${HOME_DIR}/consumer-proposal.json --chain-id provider --from $USERNAME --home ${HOME_DIR}/provider --node tcp://${NODE_IP}:${PROVIDER_PORT}  --keyring-backend test -b block -y
 
 sleep 1
 
 # Vote yes to proposal
 interchain-security-pd tx gov vote 1 yes --from $USERNAME --chain-id provider --home ${HOME_DIR}/provider -b block -y --keyring-backend test
 sleep 5
-
-## CONSUMER CHAIN ##
 
 # Clean start
 pkill -f interchain-security-cd &> /dev/null || true
@@ -122,11 +140,11 @@ cp ${HOME_DIR}/provider/config/priv_validator_key.json ${HOME_DIR}/consumer/conf
 cp ${HOME_DIR}/provider/config/node_key.json ${HOME_DIR}/consumer/config/node_key.json
 
 # Set default client port
-sed -i -r "/node =/ s/= .*/= \"tcp:\/\/${NODE_IP}:26648\"/" ${HOME_DIR}/consumer/config/client.toml
+sed -i -r "/node =/ s/= .*/= \"tcp:\/\/${NODE_IP}:${CONSUMER_PORT}\"/" ${HOME_DIR}/consumer/config/client.toml
 
 # Start giaia
 interchain-security-cd start --home ${HOME_DIR}/consumer \
-        --rpc.laddr tcp://${NODE_IP}:26648 \
+        --rpc.laddr tcp://${NODE_IP}:${CONSUMER_PORT} \
         --grpc.address ${NODE_IP}:9081 \
         --address tcp://${NODE_IP}:26645 \
         --p2p.laddr tcp://${NODE_IP}:26646 \
@@ -134,9 +152,6 @@ interchain-security-cd start --home ${HOME_DIR}/consumer \
         &> ${HOME_DIR}/consumer/logs &
 
 sleep 3
-
-# Setup Hermes in packet relayer mode
-pkill -f hermes 2> /dev/null || true
 
 mkdir ${HERMES_DIR}
 tee ${HERMES_DIR}/config.toml<<EOF
@@ -167,11 +182,11 @@ grpc_addr = "tcp://${NODE_IP}:9081"
 id = "consumer"
 key_name = "relayer"
 max_gas = 2000000
-rpc_addr = "http://${NODE_IP}:26648"
+rpc_addr = "http://${NODE_IP}:${CONSUMER_PORT}"
 rpc_timeout = "10s"
 store_prefix = "ibc"
 trusting_period = "14days"
-websocket_addr = "ws://${NODE_IP}:26648/websocket"
+websocket_addr = "ws://${NODE_IP}:${CONSUMER_PORT}/websocket"
 
 [chains.gas_price]
        denom = "stake"
@@ -185,15 +200,15 @@ websocket_addr = "ws://${NODE_IP}:26648/websocket"
 account_prefix = "cosmos"
 clock_drift = "5s"
 gas_multiplier = 1.1
-grpc_addr = "tcp://${NODE_IP}:9091"
+grpc_addr = "tcp://${NODE_IP}:28202"
 id = "provider"
 key_name = "relayer"
 max_gas = 2000000
-rpc_addr = "http://${NODE_IP}:26658"
+rpc_addr = "http://${NODE_IP}:${PROVIDER_PORT}"
 rpc_timeout = "10s"
 store_prefix = "ibc"
 trusting_period = "14days"
-websocket_addr = "ws://${NODE_IP}:26658/websocket"
+websocket_addr = "ws://${NODE_IP}:${PROVIDER_PORT}/websocket"
 
 [chains.gas_price]
        denom = "stake"
@@ -215,8 +230,9 @@ echo $(jq -r .mnemonic ${HOME_DIR}/provider/${USERNAME}_prov_keypair.json) > ${H
 hermes keys add --mnemonic-file ${HOME_DIR}/key_cons_mnemonics --chain consumer
 hermes keys add --mnemonic-file ${HOME_DIR}/key_prov_mnemonics --chain provider
 
-
 sleep 5
+
+$GM_BINARY status
 
 hermes create connection --a-chain consumer \
     --a-client 07-tendermint-0 \
