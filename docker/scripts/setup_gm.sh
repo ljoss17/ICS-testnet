@@ -185,7 +185,7 @@ max_gas = 2000000
 rpc_addr = "http://${NODE_IP}:${CONSUMER_PORT}"
 rpc_timeout = "10s"
 store_prefix = "ibc"
-trusting_period = "14days"
+trusting_period = "3minutes"
 websocket_addr = "ws://${NODE_IP}:${CONSUMER_PORT}/websocket"
 
 [chains.gas_price]
@@ -207,7 +207,7 @@ max_gas = 2000000
 rpc_addr = "http://${NODE_IP}:${PROVIDER_PORT}"
 rpc_timeout = "10s"
 store_prefix = "ibc"
-trusting_period = "14days"
+trusting_period = "3minutes"
 websocket_addr = "ws://${NODE_IP}:${PROVIDER_PORT}/websocket"
 
 [chains.gas_price]
