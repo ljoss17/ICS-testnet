@@ -1,7 +1,7 @@
 #!/bin/bash
 set -eux 
 
-HOME_DIR=""
+HOME_DIR="/root/.gm"
 USERNAME="coordinator"
 
 DELEGATIONS=$(interchain-security-pd q staking delegations \

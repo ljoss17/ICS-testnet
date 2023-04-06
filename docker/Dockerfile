@@ -13,27 +13,27 @@ RUN git clone https://github.com/cosmos/interchain-security.git
 
 RUN cd interchain-security && git checkout sainoe/export-genesis && make install
 
-FROM informalsystems/hermes:0.15.0 AS hermes-builder
-
-FROM --platform=linux/amd64 debian:buster-slim
+FROM --platform=linux/amd64 debian:bullseye-slim
 USER root
 WORKDIR /root
 
-RUN apt update && apt install -y jq vim procps
-
-COPY --chown=0:0 --from=hermes-builder /usr/lib/x86_64-linux-gnu/libssl.so.1.1 /usr/lib/x86_64-linux-gnu/libssl.so.1.1
-COPY --chown=0:0 --from=hermes-builder /usr/lib/x86_64-linux-gnu/libcrypto.so.1.1 /usr/lib/x86_64-linux-gnu/libcrypto.so.1.1
+RUN apt update && apt install -y jq vim procps net-tools git curl
 
 COPY --from=is-builder /go/bin/interchain-security-pd /usr/local/bin/interchain-security-pd
 COPY --from=is-builder /go/bin/interchain-security-cd /usr/local/bin/interchain-security-cd
 
-
-COPY --from=hermes-builder /usr/bin/hermes /usr/local/bin/
+ADD hermes /usr/local/bin/hermes
 
 RUN chmod +x /usr/local/bin/hermes /usr/local/bin/interchain-security-pd /usr/local/bin/interchain-security-cd
 
-ADD  ./scripts ./scripts
+RUN git clone https://github.com/informalsystems/gm
 
+RUN curl -Lo /usr/local/bin/sconfig https://github.com/freshautomations/sconfig/releases/download/v0.1.0/sconfig_linux_amd64
+RUN curl -Lo /usr/local/bin/stoml https://github.com/freshautomations/stoml/releases/download/v0.7.0/stoml_linux_amd64
+RUN chmod 755 /usr/local/bin/sconfig
+RUN chmod 755 /usr/local/bin/stoml
+
+ADD  ./scripts ./scripts
 EXPOSE 26658 26648
 
 ENTRYPOINT [ "/bin/bash" ]
